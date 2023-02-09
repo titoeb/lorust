@@ -1,47 +1,50 @@
-use async_trait::async_trait;
+use crate::request::{RequestError, Response, SendRequest};
 use serde::Serialize;
-
-use crate::request::{RequestError, SendRequest};
-
+use std::time::Instant;
 #[derive(Debug, Clone)]
 pub struct ReqwestConnection<'a> {
-    client: reqwest::Client,
+    client: reqwest::blocking::Client,
     host: &'a str,
 }
 
 impl<'a> ReqwestConnection<'a> {
     pub fn new(host: &'a str) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: reqwest::blocking::Client::new(),
             host,
         }
     }
 }
-#[async_trait]
 impl SendRequest for ReqwestConnection<'_> {
-    async fn get<'a>(&self, endpoint: &'a str) -> Result<String, RequestError> {
-        let response_text = self
+    fn get(&self, endpoint: &'_ str) -> Result<Response, RequestError> {
+        let request = self
             .client
             .get(format!("{}/{}", self.host, endpoint))
-            .send()
-            .await?
-            .text()
-            .await?;
-        Ok(response_text)
+            .build()?;
+
+        let request_send = Instant::now();
+        let response = self.client.execute(request)?;
+        let reponse_time = request_send.elapsed();
+
+        let response_text = response.text()?;
+        Ok(Response::new(response_text, reponse_time))
     }
-    async fn post<'a>(
+    fn post<'a>(
         &self,
         endpoint: &'a str,
-        body: &'a (impl Serialize + Sync),
-    ) -> Result<String, RequestError> {
-        let response_text = self
+        body: &'a impl Serialize,
+    ) -> Result<Response, RequestError> {
+        let request = self
             .client
             .post(format!("{}/{}", self.host, endpoint))
             .json(body)
-            .send()
-            .await?
-            .text()
-            .await?;
-        Ok(response_text)
+            .build()?;
+
+        let request_send = Instant::now();
+        let response = self.client.execute(request)?;
+        let reponse_time = request_send.elapsed();
+
+        let response_text = response.text()?;
+        Ok(Response::new(response_text, reponse_time))
     }
 }
