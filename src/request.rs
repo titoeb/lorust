@@ -1,12 +1,12 @@
 use core::fmt;
-use serde::Serialize;
+use erased_serde::Serialize;
 use std::time::Duration;
 pub trait SendRequest {
     fn get(&self, endpoint: &'_ str) -> Result<Response, RequestError>;
     fn post<'a>(
         &self,
         endpoint: &'a str,
-        body: &'a impl Serialize,
+        body: &'a dyn Serialize,
     ) -> Result<Response, RequestError>;
 }
 

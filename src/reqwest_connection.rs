@@ -1,5 +1,5 @@
 use crate::request::{RequestError, Response, SendRequest};
-use serde::Serialize;
+use erased_serde::Serialize;
 use std::time::Instant;
 #[derive(Debug, Clone)]
 pub struct ReqwestConnection<'a> {
@@ -32,7 +32,7 @@ impl SendRequest for ReqwestConnection<'_> {
     fn post<'a>(
         &self,
         endpoint: &'a str,
-        body: &'a impl Serialize,
+        body: &'a dyn Serialize,
     ) -> Result<Response, RequestError> {
         let request = self
             .client
