@@ -1,4 +1,4 @@
-use crate::request::{RequestError, Response, SendRequest};
+use crate::request::interface::{RequestError, Response, SendRequest};
 use erased_serde::Serialize;
 use std::time::Instant;
 #[derive(Debug, Clone)]

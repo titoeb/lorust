@@ -1,4 +1,4 @@
-use crate::request_data::SolveTspData;
+use crate::tsp_specific::payload::SolveTspData;
 
 pub fn six() -> SolveTspData {
     SolveTspData::new(
