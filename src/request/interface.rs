@@ -1,13 +1,13 @@
 use core::fmt;
 use erased_serde::Serialize;
 use std::time::Duration;
-pub trait SendRequest {
-    fn get(&self, endpoint: &'_ str) -> Result<Response, RequestError>;
+pub trait HTTPClient {
+    fn get(&self, endpoint: &'_ str) -> Result<TimedResponse, RequestError>;
     fn post<'a>(
         &self,
         endpoint: &'a str,
         body: &'a dyn Serialize,
-    ) -> Result<Response, RequestError>;
+    ) -> Result<TimedResponse, RequestError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,12 +20,12 @@ impl From<reqwest::Error> for RequestError {
         RequestError::RequestUnsuccesful
     }
 }
-#[derive(Debug, Clone)]
-pub struct Response {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TimedResponse {
     text: String,
     response_time: Duration,
 }
-impl Response {
+impl TimedResponse {
     pub fn new(text: String, response_time: Duration) -> Self {
         Self {
             text,
@@ -34,7 +34,7 @@ impl Response {
     }
 }
 
-impl fmt::Display for Response {
+impl fmt::Display for TimedResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -45,7 +45,7 @@ impl fmt::Display for Response {
     }
 }
 
-fn to_millisecond(duration: Duration) -> f64 {
+pub(crate) fn to_millisecond(duration: Duration) -> f64 {
     duration.as_nanos() as f64 / 1_000_000.0
 }
 
@@ -56,7 +56,7 @@ mod test {
 
     #[test]
     fn ten_milliseconds_to_milliseconds() {
-        let duration = Duration::from_millis(1000);
+        let duration = Duration::from_millis(1_000);
 
         assert_eq!(to_millisecond(duration), 1000.0)
     }
@@ -72,5 +72,16 @@ mod test {
         let duration = Duration::from_nanos(1_500_000);
 
         assert_eq!(to_millisecond(duration), 1.5)
+    }
+
+    #[test]
+    fn display_simple_response() {
+        assert_eq!(
+            format!(
+                "{}",
+                TimedResponse::new(String::from("response"), Duration::new(10, 2))
+            ),
+            String::from("Reponse: 'response'\n Response_time: '10000.000002'")
+        )
     }
 }
