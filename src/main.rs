@@ -10,8 +10,10 @@ fn main() {
     let fivteen_cities = cities::fiveteen();
     let twenty_nine_cities = cities::twenty_nine();
 
+    let client = ReqwestConnection::new(HOST);
+
     let load_test = LoadTest::new(
-        ReqwestConnection::new(HOST),
+        &client,
         vec![
             RequestDefinition::GET { endpoint: "/alive" },
             RequestDefinition::POST {
