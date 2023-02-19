@@ -1,13 +1,26 @@
 use core::fmt;
 use erased_serde::Serialize;
 use std::time::Duration;
+
+pub trait SerializableInThread: Serialize + Sync {}
+impl<T> SerializableInThread for T where T: Serialize + Sync {}
+
 pub trait HTTPClient {
     fn get(&self, endpoint: &'_ str) -> Result<TimedResponse, RequestError>;
     fn post<'a>(
         &self,
         endpoint: &'a str,
-        body: &'a dyn Serialize,
+        body: &'a dyn SerializableInThread,
     ) -> Result<TimedResponse, RequestError>;
+}
+
+impl<'a> serde::Serialize for dyn SerializableInThread + 'a {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        erased_serde::serialize(self, serializer)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

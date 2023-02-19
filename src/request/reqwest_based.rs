@@ -1,5 +1,4 @@
-use crate::request::interface::{HTTPClient, RequestError, TimedResponse};
-use erased_serde::Serialize;
+use crate::request::interface::{HTTPClient, RequestError, SerializableInThread, TimedResponse};
 use mockall::automock;
 use std::time::{Duration, Instant};
 #[derive(Debug, Clone)]
@@ -45,7 +44,7 @@ impl HTTPClient for ReqwestConnection<'_> {
     fn post<'a>(
         &self,
         endpoint: &'a str,
-        body: &'a dyn Serialize,
+        body: &'a dyn SerializableInThread,
     ) -> Result<TimedResponse, RequestError> {
         let request = build_post_request(&self.client, self.host, endpoint, body)?;
         let (response, response_time) = send_and_time_request(&self.client, request)?;
@@ -59,7 +58,7 @@ fn build_post_request(
     client: &reqwest::blocking::Client,
     host: &'_ str,
     endpoint: &'_ str,
-    body: &'_ dyn Serialize,
+    body: &'_ dyn SerializableInThread,
 ) -> Result<reqwest::blocking::Request, reqwest::Error> {
     client
         .post(format!("{}/{}", host, endpoint))

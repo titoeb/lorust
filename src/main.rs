@@ -13,7 +13,7 @@ fn main() {
     let client = ReqwestConnection::new(HOST);
 
     let load_test = LoadTest::new(
-        &client,
+        client,
         vec![
             RequestDefinition::GET { endpoint: "/alive" },
             RequestDefinition::POST {
