@@ -1,8 +1,9 @@
+use crate::request::interface::StatusCodeGroup;
 use crate::request::interface::{HTTPClient, RequestError, SerializableInThread, TimedResponse};
 use mockall::automock;
 use std::time::{Duration, Instant};
 #[derive(Debug, Clone)]
-pub struct ReqwestConnection<'a> {
+pub struct ReqwestClient<'a> {
     client: reqwest::blocking::Client,
     host: &'a str,
 }
@@ -24,7 +25,7 @@ impl Client for reqwest::blocking::Client {
     }
 }
 
-impl<'a> ReqwestConnection<'a> {
+impl<'a> ReqwestClient<'a> {
     pub fn new(host: &'a str) -> Self {
         Self {
             client: reqwest::blocking::Client::new(),
@@ -33,13 +34,12 @@ impl<'a> ReqwestConnection<'a> {
     }
 }
 
-impl HTTPClient for ReqwestConnection<'_> {
+impl HTTPClient for ReqwestClient<'_> {
     fn get(&self, endpoint: &'_ str) -> Result<TimedResponse, RequestError> {
         let request = build_get_request(&self.client, self.host, endpoint)?;
         let (response, response_time) = send_and_time_request(&self.client, request)?;
-        let response_text = extract_text(response)?;
 
-        Ok(TimedResponse::new(response_text, response_time))
+        Ok(TimedResponse::new(response.status().into(), response_time))
     }
     fn post<'a>(
         &self,
@@ -48,9 +48,20 @@ impl HTTPClient for ReqwestConnection<'_> {
     ) -> Result<TimedResponse, RequestError> {
         let request = build_post_request(&self.client, self.host, endpoint, body)?;
         let (response, response_time) = send_and_time_request(&self.client, request)?;
-        let response_text = extract_text(response)?;
 
-        Ok(TimedResponse::new(response_text, response_time))
+        Ok(TimedResponse::new(response.status().into(), response_time))
+    }
+}
+impl From<reqwest::StatusCode> for StatusCodeGroup {
+    fn from(status_code: reqwest::StatusCode) -> Self {
+        match status_code.as_u16() {
+            100..=199 => Self::Information,
+            200..=299 => Self::Success,
+            300..=399 => Self::Redirect,
+            400..=499 => Self::ClientError,
+            500..=999 => Self::ServerError,
+            _ => Self::Unknown,
+        }
     }
 }
 
@@ -83,10 +94,6 @@ fn send_and_time_request(
     let reponse_time = request_send.elapsed();
 
     Ok((response, reponse_time))
-}
-
-fn extract_text(response: reqwest::blocking::Response) -> Result<String, reqwest::Error> {
-    response.text()
 }
 
 #[cfg(test)]

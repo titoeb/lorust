@@ -1,10 +1,14 @@
+use crate::load_test::latest_response_time::ResponseTimestamp;
 use crate::request::definition::RequestDefinition;
+use crate::request::interface::to_millisecond;
 use crate::request::interface::{HTTPClient, TimedResponse};
+use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 #[derive(Clone)]
-pub struct LoadTest<'a, R>
+pub struct LoadTestDefinition<'a, R>
 where
     R: HTTPClient,
 {
@@ -12,7 +16,7 @@ where
     to_call: Vec<RequestDefinition<'a>>,
 }
 
-impl<'a, R> LoadTest<'a, R>
+impl<'a, R> LoadTestDefinition<'a, R>
 where
     R: HTTPClient,
 {
@@ -22,17 +26,27 @@ where
             to_call,
         }
     }
-    pub fn run(&self) -> Vec<TimedResponse> {
-        self.to_call
+    pub fn run(&self) -> ApiPerformance {
+        let responses: Vec<ResponseTiming> = self
+            .to_call
             .iter()
             .map(|post_request_data| match *post_request_data {
-                RequestDefinition::POST { endpoint, to_json } => {
-                    self.connection.post(endpoint, to_json)
-                }
-                RequestDefinition::GET { endpoint } => self.connection.get(endpoint),
+                RequestDefinition::POST { endpoint, to_json } => (
+                    self.connection.post(endpoint, to_json),
+                    ResponseTimestamp::from(std::time::Instant::now()),
+                ),
+                RequestDefinition::GET { endpoint } => (
+                    self.connection.get(endpoint),
+                    ResponseTimestamp::from(std::time::Instant::now()),
+                ),
             })
-            .filter_map(|response_result| response_result.ok())
-            .collect()
+            .filter_map(|(response_result, response_time)| {
+                response_result
+                    .ok()
+                    .map(|response| ResponseTiming::from((response, response_time)))
+            })
+            .collect();
+        ApiPerformance::from(responses)
     }
     pub fn client(self) -> R {
         self.connection
@@ -40,26 +54,76 @@ where
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct APIPerformance {
-    timed_responses: Vec<TimedResponse>,
+pub struct ResponseTiming {
+    timed_response: TimedResponse,
+    response_timestamp: ResponseTimestamp,
+}
+impl From<(TimedResponse, ResponseTimestamp)> for ResponseTiming {
+    fn from(response: (TimedResponse, ResponseTimestamp)) -> Self {
+        Self {
+            timed_response: response.0,
+            response_timestamp: response.1,
+        }
+    }
 }
 
-impl From<Vec<TimedResponse>> for APIPerformance {
-    fn from(timed_responses: Vec<TimedResponse>) -> Self {
-        Self { timed_responses }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApiPerformance {
+    responses: Vec<ResponseTiming>,
+}
+impl ApiPerformance {
+    pub fn new(responses: Vec<ResponseTiming>) -> Self {
+        Self { responses }
+    }
+    pub fn get_response_timestamps(&self) -> Vec<ResponseTimestamp> {
+        self.responses
+            .iter()
+            .map(|timed_response| timed_response.response_timestamp)
+            .collect()
+    }
+    pub fn get_response_times(&self) -> Vec<Duration> {
+        self.responses
+            .iter()
+            .map(|time_response| time_response.timed_response.response_time)
+            .collect()
+    }
+    pub fn get_responses(self) -> Vec<TimedResponse> {
+        self.responses
+            .into_iter()
+            .map(|response| response.timed_response)
+            .collect()
+    }
+    pub fn average_response_time(&self) -> f64 {
+        let sum_of_response_times = self
+            .get_response_times()
+            .iter()
+            .map(|&duration| to_millisecond(duration))
+            .sum::<f64>();
+
+        match self.responses.len() {
+            0 => 0.0,
+            number_of_responses => sum_of_response_times / number_of_responses as f64,
+        }
+    }
+}
+impl From<Vec<ResponseTiming>> for ApiPerformance {
+    fn from(timed_responses: Vec<ResponseTiming>) -> Self {
+        Self {
+            responses: timed_responses,
+        }
     }
 }
 
 pub fn run_loadtest_in_thread<R>(
     kill_switch: KillSwitch,
-    send_api_performance: Sender<APIPerformance>,
-    load_test: LoadTest<'_, R>,
+    send_to_controller: Sender<ApiPerformance>,
+    load_test_definition: LoadTestDefinition<'_, R>,
 ) where
     R: HTTPClient,
 {
     loop {
-        let api_performance = load_test.run();
-        send_api_performance.send(api_performance.into()).unwrap();
+        let api_performance = load_test_definition.run();
+        send_to_controller.send(api_performance).unwrap();
         if kill_switch.is_activated() {
             break;
         }
@@ -70,7 +134,6 @@ pub fn run_loadtest_in_thread<R>(
 pub struct KillSwitch {
     signal: Arc<Mutex<bool>>,
 }
-
 impl KillSwitch {
     pub fn new() -> Self {
         Self {
@@ -97,6 +160,28 @@ impl Clone for KillSwitch {
     }
 }
 
+#[derive(Debug)]
+pub struct ApiPerformanceCommunicator {
+    send_to_controller: mpsc::Sender<ApiPerformance>,
+    receive_performance: mpsc::Receiver<ApiPerformance>,
+}
+impl ApiPerformanceCommunicator {
+    pub fn initialize() -> Self {
+        let (send_to_controller, receive_api_performance) = mpsc::channel::<ApiPerformance>();
+        Self {
+            send_to_controller,
+            receive_performance: receive_api_performance,
+        }
+    }
+    pub fn new_sender(&self) -> Sender<ApiPerformance> {
+        self.send_to_controller.clone()
+    }
+    pub fn extract_receiver(self) -> mpsc::Receiver<ApiPerformance> {
+        std::mem::drop(self.send_to_controller);
+        self.receive_performance
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,6 +189,7 @@ mod tests {
         use super::*;
         use crate::request::interface::HTTPClient;
         use crate::request::interface::SerializableInThread;
+        use crate::request::interface::StatusCodeGroup;
         use crate::request::interface::TimedResponse;
         use crossbeam_utils::thread;
         use std::cell::RefCell;
@@ -133,7 +219,7 @@ mod tests {
                 get_request_endpoints.push(endpoint.to_string());
 
                 Ok(TimedResponse::new(
-                    "alive".to_string(),
+                    StatusCodeGroup::Success,
                     Duration::from_millis(10),
                 ))
             }
@@ -147,7 +233,7 @@ mod tests {
                     .push((endpoint.to_string(), serde_json::to_string(body).unwrap()));
 
                 Ok(TimedResponse::new(
-                    "user created".to_string(),
+                    StatusCodeGroup::Success,
                     Duration::from_millis(50),
                 ))
             }
@@ -165,7 +251,7 @@ mod tests {
             let steven = TestPayload { name: "Steven" };
             let sarah = TestPayload { name: "Sarah" };
 
-            let load_test = LoadTest::new(
+            let load_test = LoadTestDefinition::new(
                 client,
                 vec![
                     RequestDefinition::GET {
@@ -181,15 +267,15 @@ mod tests {
                     },
                 ],
             );
-            let result = load_test.run();
+            let api_performance = load_test.run();
             let client = load_test.client();
 
             assert_eq!(
-                result,
+                api_performance.get_responses(),
                 vec! {
-                    TimedResponse::new("alive".to_string(), Duration::from_millis(10)),
-                    TimedResponse::new("user created".to_string(), Duration::from_millis(50)),
-                    TimedResponse::new("user created".to_string(), Duration::from_millis(50)),
+                    TimedResponse::new(StatusCodeGroup::Success, Duration::from_millis(10)),
+                    TimedResponse::new(StatusCodeGroup::Success, Duration::from_millis(50)),
+                    TimedResponse::new(StatusCodeGroup::Success, Duration::from_millis(50)),
                 }
             );
 
@@ -228,7 +314,7 @@ mod tests {
                 _endpoint: &'_ str,
             ) -> Result<TimedResponse, crate::request::interface::RequestError> {
                 Ok(TimedResponse::new(
-                    "alive".to_string(),
+                    StatusCodeGroup::Success,
                     Duration::from_millis(10),
                 ))
             }
@@ -238,7 +324,7 @@ mod tests {
                 _body: &'a dyn SerializableInThread,
             ) -> Result<TimedResponse, crate::request::interface::RequestError> {
                 Ok(TimedResponse::new(
-                    "user created".to_string(),
+                    StatusCodeGroup::Success,
                     Duration::from_millis(50),
                 ))
             }
@@ -252,8 +338,8 @@ mod tests {
             let kill_switch = KillSwitch::new();
 
             let (send_api_performance, receive_load_performance) =
-                mpsc::channel::<APIPerformance>();
-            let load_test = LoadTest::new(
+                mpsc::channel::<ApiPerformance>();
+            let load_test = LoadTestDefinition::new(
                 client,
                 vec![
                     RequestDefinition::GET {
@@ -269,7 +355,7 @@ mod tests {
                     },
                 ],
             );
-            let api_performances = thread::scope(|s| {
+            let mut api_performances = thread::scope(|s| {
                 let mut users = Vec::new();
                 for _ in 0..2 {
                     let send_api_performance = send_api_performance.clone();
@@ -294,15 +380,17 @@ mod tests {
             .unwrap();
 
             assert!(api_performances.len() > 2, "Two threads are running the tests continously until they receive the kill-signal. Therfore, we have at least two measurements.");
+            let firsts_responses = api_performances
+                .pop()
+                .expect("Has at least one entry after statement before was successful")
+                .get_responses();
             assert_eq!(
-                api_performances[0],
-                APIPerformance {
-                    timed_responses: vec![
-                        TimedResponse::new(String::from("alive"), Duration::from_millis(10)),
-                        TimedResponse::new(String::from("user created"), Duration::from_millis(50)),
-                        TimedResponse::new(String::from("user created"), Duration::from_millis(50)),
-                    ]
-                }
+                firsts_responses,
+                vec![
+                    TimedResponse::new(StatusCodeGroup::Success, Duration::from_millis(10)),
+                    TimedResponse::new(StatusCodeGroup::Success, Duration::from_millis(50)),
+                    TimedResponse::new(StatusCodeGroup::Success, Duration::from_millis(50)),
+                ]
             )
         }
     }
@@ -348,6 +436,120 @@ mod tests {
         #[test]
         fn three_threads() {
             run_threads_then_kill(3);
+        }
+    }
+    mod api_performance_communicator {
+        use super::*;
+        use crate::request::interface::StatusCodeGroup;
+        use std::sync::mpsc;
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        fn send_single_message(send_to_main: mpsc::Sender<ApiPerformance>) {
+            send_to_main
+                .send(ApiPerformance {
+                    responses: vec![ResponseTiming::from((
+                        TimedResponse::new(StatusCodeGroup::Success, Duration::from_millis(200)),
+                        ResponseTimestamp::from(Instant::now()),
+                    ))],
+                })
+                .unwrap();
+            std::mem::drop(send_to_main)
+        }
+
+        #[test]
+        fn thread() {
+            let api_performance_communicator = ApiPerformanceCommunicator::initialize();
+            let mut message_senders = Vec::new();
+
+            for _ in 0..2 {
+                let send_to_main = api_performance_communicator.new_sender();
+                message_senders.push(thread::spawn(|| send_single_message(send_to_main)));
+            }
+
+            let api_performance_receiver = api_performance_communicator.extract_receiver();
+            let mut messages = Vec::new();
+            while let Ok(message) = api_performance_receiver.recv() {
+                messages.push(message.get_responses().pop().unwrap());
+            }
+
+            let _: Vec<std::thread::Result<()>> = message_senders
+                .into_iter()
+                .map(|message_sender| message_sender.join())
+                .collect();
+
+            assert_eq!(
+                messages,
+                vec![
+                    TimedResponse::new(StatusCodeGroup::Success, Duration::from_millis(200),),
+                    TimedResponse::new(StatusCodeGroup::Success, Duration::from_millis(200),)
+                ]
+            )
+        }
+    }
+
+    mod api_performance {
+        use super::*;
+        use crate::request::interface::StatusCodeGroup;
+        use std::time::Instant;
+
+        #[test]
+        fn extract_two_response_times() {
+            let api_performance = ApiPerformance {
+                responses: vec![
+                    ResponseTiming::from((
+                        TimedResponse::new(StatusCodeGroup::Success, Duration::from_millis(100)),
+                        ResponseTimestamp::from(Instant::now()),
+                    )),
+                    ResponseTiming::from((
+                        TimedResponse::new(StatusCodeGroup::Success, Duration::from_millis(90)),
+                        ResponseTimestamp::from(Instant::now()),
+                    )),
+                    ResponseTiming::from((
+                        TimedResponse::new(StatusCodeGroup::Success, Duration::from_millis(250)),
+                        ResponseTimestamp::from(Instant::now()),
+                    )),
+                ],
+            };
+
+            assert_eq!(
+                api_performance.get_response_times(),
+                vec![
+                    Duration::from_millis(100),
+                    Duration::from_millis(90),
+                    Duration::from_millis(250)
+                ]
+            )
+        }
+        #[test]
+        fn extract_no_response_times() {
+            let api_performance = ApiPerformance::new(vec![]);
+            assert_eq!(api_performance.get_response_times(), vec![])
+        }
+        #[test]
+        fn average_of_three_responses() {
+            let api_performance = ApiPerformance {
+                responses: vec![
+                    ResponseTiming::from((
+                        TimedResponse::new(StatusCodeGroup::Success, Duration::from_millis(180)),
+                        ResponseTimestamp::from(Instant::now()),
+                    )),
+                    ResponseTiming::from((
+                        TimedResponse::new(StatusCodeGroup::Success, Duration::from_millis(90)),
+                        ResponseTimestamp::from(Instant::now()),
+                    )),
+                    ResponseTiming::from((
+                        TimedResponse::new(StatusCodeGroup::Success, Duration::from_millis(270)),
+                        ResponseTimestamp::from(Instant::now()),
+                    )),
+                ],
+            };
+            assert_eq!(api_performance.average_response_time(), 180.0)
+        }
+        #[test]
+        fn average_response_time_of_no_responses() {
+            let api_performance = ApiPerformance::new(vec![]);
+            assert_eq!(api_performance.average_response_time(), 0.0)
         }
     }
 }
