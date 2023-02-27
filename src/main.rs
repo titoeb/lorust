@@ -1,36 +1,27 @@
 use crossbeam_utils::thread;
+use loadtest::command_line_interface::run::run;
 use loadtest::load_test::core::ApiPerformanceCommunicator;
 use loadtest::load_test::core::{run_loadtest_in_thread, KillSwitch};
 use loadtest::load_test::performance_aggregator::PerformanceAggregator;
-use loadtest::request::definition::RequestDefinition;
 use loadtest::request::interface::HTTPClient;
-use loadtest::request::reqwest_based::ReqwestClient;
 use loadtest::tsp_specific::cities;
+use loadtest::tsp_specific::example::get_load_test;
 use loadtest::LoadTestDefinition;
+use std::error::Error;
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
+    run()
+}
+
+fn previous_run() {
     let six_cities = cities::six();
     let fivteen_cities = cities::fiveteen();
     let twenty_nine_cities = cities::twenty_nine();
-    let load_test_definition = LoadTestDefinition::new(
-        ReqwestClient::new("http://localhost/"),
-        vec![
-            RequestDefinition::GET { endpoint: "/alive" },
-            RequestDefinition::POST {
-                endpoint: "/tsp",
-                to_json: &six_cities,
-            },
-            RequestDefinition::POST {
-                endpoint: "/tsp",
-                to_json: &fivteen_cities,
-            },
-            RequestDefinition::POST {
-                endpoint: "/tsp",
-                to_json: &twenty_nine_cities,
-            },
-        ],
+    run_loadtest(
+        get_load_test(&six_cities, &fivteen_cities, &twenty_nine_cities),
+        10,
+        1_000_000_000,
     );
-    run_loadtest(load_test_definition, 4, 1_000);
 }
 
 fn run_loadtest<R>(

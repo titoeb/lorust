@@ -87,7 +87,7 @@ pub(crate) fn to_millisecond(duration: Duration) -> f64 {
     duration.as_nanos() as f64 / 1_000_000.0
 }
 
-pub(crate) fn to_seconds(duration: Duration) -> f64 {
+pub fn to_seconds(duration: Duration) -> f64 {
     to_millisecond(duration) / 1000.0
 }
 

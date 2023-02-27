@@ -52,6 +52,9 @@ impl PerformanceAggregator {
             SMOOTHING,
         );
     }
+    pub fn request_per_second(&self) -> f64 {
+        self.requests_per_second
+    }
 }
 impl std::fmt::Display for PerformanceAggregator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
