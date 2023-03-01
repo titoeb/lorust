@@ -1,14 +1,14 @@
 use crate::command_line_interface::load_test_visualizer::LoadtestVisualizer;
-use crate::command_line_interface::plots::draw_plots;
-use crate::load_test::core::ApiPerformanceCommunicator;
+
+use crate::load_test::core::PerformanceCommunicator;
 use crate::load_test::core::{run_loadtest_in_thread, KillSwitch};
 use crate::load_test::performance_aggregator::PerformanceAggregator;
-use crate::request::interface::to_seconds;
-use crate::tsp_specific::cities;
-use crate::tsp_specific::example::get_load_test;
+use crate::request::interface::{to_seconds, HTTPClient};
+
+use crate::LoadTestDefinition;
 use crossbeam_utils::thread;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    event::{DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -22,13 +22,14 @@ use tui::{
     Terminal,
 };
 
-pub fn run() -> Result<(), Box<dyn Error>> {
+pub fn run<C>(definition: LoadTestDefinition<C>) -> Result<(), Box<dyn Error>>
+where
+    C: HTTPClient + Send + Clone,
+{
     let mut terminal = setup_terminal()?;
-    log_error(run_gui(
-        &mut terminal,
-        LoadtestVisualizer::new(),
-        Duration::from_millis(100),
-    ));
+    let mut loadtest = LoadTest::new(definition, 2, Duration::from_millis(100), &mut terminal);
+
+    log_error(loadtest.run());
     restore_terminal(terminal)?;
 
     Ok(())
@@ -59,62 +60,78 @@ fn restore_terminal(
     terminal.show_cursor()
 }
 
-fn run_gui<B: Backend>(
-    terminal: &mut Terminal<B>,
-    mut app: LoadtestVisualizer,
-    refresh_rate: Duration,
-) -> io::Result<()> {
-    let start_time = Instant::now();
-    let kill_switch = KillSwitch::new();
-    let performance_communicator = ApiPerformanceCommunicator::initialize();
-    let n_threads = 2;
-    let six_cities = cities::six();
-    let fivteen_cities = cities::fiveteen();
-    let twenty_nine_cities = cities::twenty_nine();
-    let loadtest_definition = get_load_test(&six_cities, &fivteen_cities, &twenty_nine_cities);
-
-    thread::scope(|s| {
-        let mut users = Vec::new();
-        for _ in 0..n_threads {
-            let send_to_controller = performance_communicator.new_sender();
-
-            let load_test_definition = loadtest_definition.clone();
-            let kill_switch = kill_switch.clone();
-
-            users.push(s.spawn(|_| {
-                run_loadtest_in_thread(kill_switch, send_to_controller, load_test_definition)
-            }))
+#[derive(Debug)]
+pub struct LoadTest<'a, R: HTTPClient, B>
+where
+    B: Backend,
+{
+    kill_switch: KillSwitch,
+    performance_communicator: PerformanceCommunicator,
+    definition: LoadTestDefinition<'a, R>,
+    visualizer: LoadtestVisualizer<'a, B>,
+    n_user: usize,
+}
+impl<'a, R, B> LoadTest<'a, R, B>
+where
+    R: HTTPClient + Clone + Send,
+    B: Backend,
+{
+    fn new(
+        definition: LoadTestDefinition<'a, R>,
+        n_user: usize,
+        refresh_rate: Duration,
+        terminal: &'a mut Terminal<B>,
+    ) -> Self {
+        Self {
+            kill_switch: KillSwitch::new(),
+            performance_communicator: PerformanceCommunicator::initialize(),
+            visualizer: LoadtestVisualizer::new(terminal, refresh_rate),
+            definition,
+            n_user,
         }
-        let mut performance = PerformanceAggregator::empty();
-        let api_performance_receiver = performance_communicator.extract_receiver();
-        loop {
-            terminal
-                .draw(|frame| draw_plots(frame, &app))
-                .expect("To be checked");
-            if let Ok(received_response) = api_performance_receiver.recv() {
-                performance.update(received_response);
-                app.update_request(
-                    to_seconds(start_time.elapsed()),
-                    performance.request_per_second(),
-                )
+    }
+    fn run(&mut self) -> io::Result<()> {
+        let start_time = Instant::now();
+
+        // TODO: Better seperation of concerns:
+        // - drawing should go to visualizer
+        // - performance aggregator to visualizer?
+        thread::scope(|s| {
+            let mut users = Vec::new();
+            for _ in 0..self.n_user {
+                let send_to_controller = self.performance_communicator.new_sender();
+
+                let load_test_definition = self.definition.clone();
+                let kill_switch = self.kill_switch.clone();
+
+                users.push(s.spawn(|_| {
+                    run_loadtest_in_thread(kill_switch, send_to_controller, load_test_definition)
+                }))
             }
+            let mut performance = PerformanceAggregator::empty();
 
-            let timeout = refresh_rate
-                .checked_sub(start_time.elapsed())
-                .unwrap_or_else(|| Duration::from_secs(0));
-            if crossterm::event::poll(timeout).expect("to be checked") {
-                if let Event::Key(key) = event::read().expect("to_be_checked") {
-                    if let KeyCode::Char('q') = key.code {
-                        kill_switch.activate();
-                        let _: Vec<std::thread::Result<()>> =
-                            users.into_iter().map(|worker| worker.join()).collect();
+            let api_performance_receiver =
+                std::mem::take(&mut self.performance_communicator).extract_receiver();
+            loop {
+                self.visualizer.draw();
+                if let Ok(received_response) = api_performance_receiver.recv() {
+                    performance.update(received_response);
+                    self.visualizer.update_request(
+                        to_seconds(start_time.elapsed()),
+                        performance.request_per_second(),
+                    )
+                }
 
-                        break;
-                    }
+                if self.visualizer.was_killed() {
+                    break;
                 }
             }
-        }
-    })
-    .expect("to be checked.");
-    Ok(())
+
+            self.kill_switch.activate();
+            let _: Vec<std::thread::Result<()>> =
+                users.into_iter().map(|worker| worker.join()).collect();
+        })
+        .expect("to be checked.");
+        Ok(())
+    }
 }

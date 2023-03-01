@@ -7,7 +7,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LoadTestDefinition<'a, R>
 where
     R: HTTPClient,
@@ -161,11 +161,11 @@ impl Clone for KillSwitch {
 }
 
 #[derive(Debug)]
-pub struct ApiPerformanceCommunicator {
+pub struct PerformanceCommunicator {
     send_to_controller: mpsc::Sender<ApiPerformance>,
     receive_performance: mpsc::Receiver<ApiPerformance>,
 }
-impl ApiPerformanceCommunicator {
+impl PerformanceCommunicator {
     pub fn initialize() -> Self {
         let (send_to_controller, receive_api_performance) = mpsc::channel::<ApiPerformance>();
         Self {
@@ -179,6 +179,11 @@ impl ApiPerformanceCommunicator {
     pub fn extract_receiver(self) -> mpsc::Receiver<ApiPerformance> {
         std::mem::drop(self.send_to_controller);
         self.receive_performance
+    }
+}
+impl Default for PerformanceCommunicator {
+    fn default() -> Self {
+        Self::initialize()
     }
 }
 
@@ -239,7 +244,7 @@ mod tests {
             }
         }
 
-        #[derive(serde::Serialize)]
+        #[derive(serde::Serialize, Debug)]
         struct TestPayload<'a> {
             name: &'a str,
         }
@@ -459,7 +464,7 @@ mod tests {
 
         #[test]
         fn thread() {
-            let api_performance_communicator = ApiPerformanceCommunicator::initialize();
+            let api_performance_communicator = PerformanceCommunicator::initialize();
             let mut message_senders = Vec::new();
 
             for _ in 0..2 {

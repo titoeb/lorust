@@ -1,4 +1,4 @@
-use crate::command_line_interface::load_test_visualizer::LoadtestVisualizer;
+use crate::command_line_interface::load_test_visualizer::VisualizerData;
 use tui::layout::Rect;
 use tui::{
     backend::Backend,
@@ -10,10 +10,13 @@ use tui::{
     Frame,
 };
 
-pub(crate) fn draw_plots<B: Backend>(frame: &mut Frame<B>, visualizer: &LoadtestVisualizer) {
+pub(crate) fn draw_plots<B: Backend>(frame: &mut Frame<B>, visualizer_data: &VisualizerData)
+where
+    B: Backend,
+{
     let panes = create_three_plots(frame);
     frame.render_widget(
-        display_request_rate(visualizer),
+        display_request_rate(visualizer_data),
         *panes.get(0).expect("One Pane has to exist."),
     );
 }
@@ -26,29 +29,29 @@ pub(crate) fn create_three_plots<B: Backend>(frame: &mut Frame<B>) -> Vec<Rect> 
         .split(size)
 }
 
-pub(crate) fn generate_lable_time_axis(visualizer: &LoadtestVisualizer) -> Vec<Span> {
+pub(crate) fn generate_lable_time_axis(visualizer_data: &VisualizerData) -> Vec<Span> {
     vec![
         Span::styled(
-            format!("{}", visualizer.window[0]),
+            format!("{}", visualizer_data.window[0]),
             Style::default().add_modifier(Modifier::BOLD),
         ),
         Span::raw(format!(
             "{}",
-            (visualizer.window[0] + visualizer.window[1]) / 2.0
+            (visualizer_data.window[0] + visualizer_data.window[1]) / 2.0
         )),
         Span::styled(
-            format!("{}", visualizer.window[1]),
+            format!("{}", visualizer_data.window[1]),
             Style::default().add_modifier(Modifier::BOLD),
         ),
     ]
 }
 
-fn display_request_rate(visualizer: &LoadtestVisualizer) -> tui::widgets::Chart {
+fn display_request_rate(visualizer_data: &VisualizerData) -> tui::widgets::Chart {
     let datasets = vec![Dataset::default()
         .name("request_per_second")
         .marker(symbols::Marker::Dot)
         .style(Style::default().fg(Color::Cyan))
-        .data(&visualizer.requests_per_second)];
+        .data(&visualizer_data.requests_per_second)];
 
     Chart::new(datasets)
         .block(
@@ -65,8 +68,8 @@ fn display_request_rate(visualizer: &LoadtestVisualizer) -> tui::widgets::Chart 
             Axis::default()
                 .title("Time")
                 .style(Style::default().fg(Color::Gray))
-                .labels(generate_lable_time_axis(visualizer))
-                .bounds(visualizer.window),
+                .labels(generate_lable_time_axis(visualizer_data))
+                .bounds(visualizer_data.window),
         )
         .y_axis(
             Axis::default()

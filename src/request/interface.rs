@@ -1,9 +1,10 @@
 use core::fmt;
+use core::fmt::Debug;
 use erased_serde::Serialize;
 use std::time::Duration;
 
-pub trait SerializableInThread: Serialize + Sync {}
-impl<T> SerializableInThread for T where T: Serialize + Sync {}
+pub trait SerializableInThread: Serialize + Sync + Debug {}
+impl<T> SerializableInThread for T where T: Serialize + Sync + Debug {}
 
 pub trait HTTPClient {
     fn get(&self, endpoint: &'_ str) -> Result<TimedResponse, RequestError>;

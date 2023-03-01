@@ -1,6 +1,6 @@
 use crate::request::interface::SerializableInThread;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum RequestDefinition<'a> {
     POST {
         endpoint: &'a str,

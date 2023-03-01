@@ -128,7 +128,7 @@ mod test {
         assert_request_same_method_url(&request, &expected_request)
     }
 
-    #[derive(Serialize)]
+    #[derive(Serialize, Debug)]
     struct TestContent<'a> {
         message: &'a str,
     }
