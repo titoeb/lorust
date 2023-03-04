@@ -106,13 +106,13 @@ mod tests {
 
             let mut last_reponse_times = LastResponses::new(Duration::from_secs(100));
 
-            last_reponse_times.push(now.clone());
+            last_reponse_times.push(now);
             assert_eq!(last_reponse_times.peek(), Some(&now));
 
             last_reponse_times.push(later);
             assert_eq!(last_reponse_times.peek(), Some(&now));
 
-            last_reponse_times.push(earliest.clone());
+            last_reponse_times.push(earliest);
             assert_eq!(last_reponse_times.peek(), Some(&earliest));
         }
         #[test]
@@ -133,7 +133,7 @@ mod tests {
             let earliest =
                 ResponseTimestamp::from(Instant::now() - std::time::Duration::from_secs(1));
             let mut heap = BinaryHeap::new();
-            heap.push(earliest.clone());
+            heap.push(earliest);
 
             let mut last_reponse_times = LastResponses {
                 heap,
@@ -171,8 +171,8 @@ mod tests {
             let mut heap = BinaryHeap::new();
             heap.push(earliest);
             heap.push(still_to_early);
-            heap.push(late_enough.clone());
-            heap.push(now.clone());
+            heap.push(late_enough);
+            heap.push(now);
 
             let mut last_reponse_times = LastResponses {
                 heap,

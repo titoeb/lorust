@@ -31,6 +31,9 @@ impl PerformanceAggregator {
             last_responses: LastResponses::new(Duration::from_secs(5)),
         }
     }
+    pub fn reset(&mut self) {
+        *self = Self::empty();
+    }
     pub fn update(&mut self, performance: ApiPerformance) {
         self.update_response_time(performance.average_response_time());
         self.update_requests_per_second(performance.get_response_timestamps());
@@ -54,6 +57,9 @@ impl PerformanceAggregator {
     }
     pub fn request_per_second(&self) -> f64 {
         self.requests_per_second
+    }
+    pub fn response_time(&self) -> f64 {
+        self.response_time_in_milliseconds
     }
 }
 impl std::fmt::Display for PerformanceAggregator {

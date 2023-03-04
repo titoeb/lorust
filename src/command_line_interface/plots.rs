@@ -1,4 +1,4 @@
-use crate::command_line_interface::load_test_visualizer::VisualizerData;
+use crate::command_line_interface::load_test_visualizer;
 use tui::layout::Rect;
 use tui::{
     backend::Backend,
@@ -10,13 +10,16 @@ use tui::{
     Frame,
 };
 
-pub(crate) fn draw_plots<B: Backend>(frame: &mut Frame<B>, visualizer_data: &VisualizerData)
-where
+pub(crate) fn draw_plots<B: Backend>(
+    frame: &mut Frame<B>,
+    visualizer_settings: &load_test_visualizer::Settings,
+    visualizer_data: &load_test_visualizer::Data,
+) where
     B: Backend,
 {
     let panes = create_three_plots(frame);
     frame.render_widget(
-        display_request_rate(visualizer_data),
+        display_request_rate(visualizer_settings, visualizer_data),
         *panes.get(0).expect("One Pane has to exist."),
     );
 }
@@ -29,7 +32,9 @@ pub(crate) fn create_three_plots<B: Backend>(frame: &mut Frame<B>) -> Vec<Rect> 
         .split(size)
 }
 
-pub(crate) fn generate_lable_time_axis(visualizer_data: &VisualizerData) -> Vec<Span> {
+pub(crate) fn generate_lable_time_axis(
+    visualizer_data: &load_test_visualizer::Settings,
+) -> Vec<Span> {
     vec![
         Span::styled(
             format!("{}", visualizer_data.window[0]),
@@ -46,7 +51,10 @@ pub(crate) fn generate_lable_time_axis(visualizer_data: &VisualizerData) -> Vec<
     ]
 }
 
-fn display_request_rate(visualizer_data: &VisualizerData) -> tui::widgets::Chart {
+fn display_request_rate<'a>(
+    visualizer_settings: &'a load_test_visualizer::Settings,
+    visualizer_data: &'a load_test_visualizer::Data,
+) -> tui::widgets::Chart<'a> {
     let datasets = vec![Dataset::default()
         .name("request_per_second")
         .marker(symbols::Marker::Dot)
@@ -68,8 +76,8 @@ fn display_request_rate(visualizer_data: &VisualizerData) -> tui::widgets::Chart
             Axis::default()
                 .title("Time")
                 .style(Style::default().fg(Color::Gray))
-                .labels(generate_lable_time_axis(visualizer_data))
-                .bounds(visualizer_data.window),
+                .labels(generate_lable_time_axis(visualizer_settings))
+                .bounds(visualizer_settings.window),
         )
         .y_axis(
             Axis::default()
