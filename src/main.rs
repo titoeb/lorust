@@ -1,38 +1,16 @@
-use loadtest::request::definition::RequestDefinition;
-use loadtest::request::reqwest_based::ReqwestConnection;
+use loadtest::command_line_interface::run::run;
 use loadtest::tsp_specific::cities;
-use loadtest::LoadTest;
+use loadtest::tsp_specific::example::get_load_test;
+use std::error::Error;
 
-static HOST: &str = "http://localhost/";
-
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     let six_cities = cities::six();
     let fivteen_cities = cities::fiveteen();
     let twenty_nine_cities = cities::twenty_nine();
 
-    let client = ReqwestConnection::new(HOST);
-
-    let load_test = LoadTest::new(
-        &client,
-        vec![
-            RequestDefinition::GET { endpoint: "/alive" },
-            RequestDefinition::POST {
-                endpoint: "/tsp",
-                to_json: &six_cities,
-            },
-            RequestDefinition::POST {
-                endpoint: "/tsp",
-                to_json: &fivteen_cities,
-            },
-            RequestDefinition::POST {
-                endpoint: "/tsp",
-                to_json: &twenty_nine_cities,
-            },
-        ],
-    );
-
-    let reponses = load_test.run();
-    for response in reponses {
-        println!("{:?}", response)
-    }
+    run(get_load_test(
+        &six_cities,
+        &fivteen_cities,
+        &twenty_nine_cities,
+    ))
 }
